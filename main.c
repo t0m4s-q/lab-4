@@ -18,6 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "cmsis_os.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -49,6 +50,13 @@ TIM_HandleTypeDef htim2;
 
 UART_HandleTypeDef huart4;
 
+/* Definitions for defaultTask */
+osThreadId_t defaultTaskHandle;
+const osThreadAttr_t defaultTask_attributes = {
+  .name = "defaultTask",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
 /* USER CODE BEGIN PV */
 volatile uint8_t  indice_pantalla= 0;
 //volatile uint8_t contador_10ms = 0;
@@ -64,6 +72,8 @@ volatile uint8_t flag_message=0;
 //uint8_t segundos = 0;
 //uint8_t minutos = 0;
 uint16_t tiempo_restante = 0;
+const uint16_t TIEMPO_INICIAL = 120;
+volatile bool cronometro_corriendo = false;
 const osThreadAttr_t crono_attr = {
   .name = "TareaCronometro",
   .stack_size = 128 * 4,
@@ -75,7 +85,7 @@ const osThreadAttr_t botones_attr = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
-const osThreadAttr_t uart_attr {
+const osThreadAttr_t uart_attr = {
 	.name="TareaUART",
 	.stack_size= 256*4,
 	.priority = (osPriority_t) osPriorityNormal
@@ -90,6 +100,8 @@ static void MX_GPIO_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_UART4_Init(void);
 static void MX_TIM2_Init(void);
+void StartDefaultTask(void *argument);
+
 /* USER CODE BEGIN PFP */
 void ActualizarDigitos(void);
 void TareaCronometro(void* argumento);
@@ -98,11 +110,11 @@ void TareaBotones(void* argumento);
 bool HayNuevaPulsacion(GPIO_TypeDef* PULSADOR,uint16_t PIN, GPIO_PinState* estado_valido);
 void Display_EscribirPatron(uint8_t patron, uint8_t indice_pantalla);
 void seleccionar(uint8_t indicepantalla);
-bool evento_pausa(bool* ptr_cronometro_corriendo);
+/*bool evento_pausa(bool* ptr_cronometro_corriendo);
 bool evento_start(bool* ptr_cronometro_corriendo);
 void evento_reset();
 void evento_status(bool cronometro_corriendo, uint16_t tiempo_actual);
-void evento_set();
+void evento_set();*/
 
 
 /* USER CODE END PFP */
@@ -157,136 +169,50 @@ int main(void)
 
   /* USER CODE END 2 */
 
+  /* Init scheduler */
+  osKernelInitialize();
+
+  /* USER CODE BEGIN RTOS_MUTEX */
+  /* add mutexes, ... */
+  /* USER CODE END RTOS_MUTEX */
+
+  /* USER CODE BEGIN RTOS_SEMAPHORES */
+  /* add semaphores, ... */
+  /* USER CODE END RTOS_SEMAPHORES */
+
+  /* USER CODE BEGIN RTOS_TIMERS */
+  /* start timers, add new ones, ... */
+  /* USER CODE END RTOS_TIMERS */
+
+  /* USER CODE BEGIN RTOS_QUEUES */
+  /* add queues, ... */
+  /* USER CODE END RTOS_QUEUES */
+
+  /* Create the thread(s) */
+  /* creation of defaultTask */
+  defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
+
+  /* USER CODE BEGIN RTOS_THREADS */
+  /* add threads, ... */
+  /* USER CODE END RTOS_THREADS */
+
+  /* USER CODE BEGIN RTOS_EVENTS */
+  /* add events, ... */
+  /* USER CODE END RTOS_EVENTS */
+
+  /* Start scheduler */
+  osKernelStart();
+
+  /* We should never get here as control is now taken by the scheduler */
+
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-	while (1)
-	{
-		if (flag_message == 1)
-			{
-				// Acá vas a interpretar el comando y generar el evento (Puntos 6 y 7)[cite: 1]
-				// Por ejemplo, comparar rx_buffer con "START", "RESET", etc.
-
-				// Por ahora solo hacemos un eco (lo enviamos de vuelta) para probar que funciona
-				HAL_UART_Transmit(&huart4, (uint8_t*)rx_buffer, rx_index, 100);
-				HAL_UART_Transmit(&huart4, (uint8_t*)"\r\n", 2, 100);
-
-				if(strcmp((char*)rx_buffer, "start") == 0)
-				{
-				    evento_start(&cronometro_corriendo);
-				}
-				else if(strcmp((char*)rx_buffer, "pause") == 0)
-				{
-				    evento_pausa(&cronometro_corriendo);
-				}
-				else if(strcmp((char*)rx_buffer, "status") == 0)
-				{
-				    evento_status(cronometro_corriendo, tiempo_restante);
-				}
-				else if((strncmp((char*)rx_buffer,"set ",4))==0)
-				{
-					int valor_recibido = atoi((char*)&rx_buffer[4]);
-
-					// El laboratorio pide que el rango sea de 0 a 5999 segundos
-					if (valor_recibido >= 0 && valor_recibido <= 5999)
-					{
-						cronometro_corriendo = false;
-						tiempo_restante = (uint16_t)valor_recibido;
-						centesimas = 0;
-
-						// Actualizamos los dígitos inmediatamente con el nuevo valor
-						uint8_t min = tiempo_restante / 60;
-						uint8_t seg = tiempo_restante % 60;
-						digitos_a_mostrar[3] = min / 10;
-						digitos_a_mostrar[2] = min % 10;
-						digitos_a_mostrar[1] = seg / 10;
-						digitos_a_mostrar[0] = seg % 10;
-
-						HAL_UART_Transmit(&huart4, (uint8_t*)"OK\r\n", 4, 100);
-					}
-					else
-					{
-						// Robustez: ¿Qué pasa si mandan "SET 9000"?[cite: 1]
-						HAL_UART_Transmit(&huart4, (uint8_t*)"ERROR RANGO\r\n", 13, 100);
-					}
-				}
-				else if(strcmp((char*)rx_buffer,"pause")==0)
-				{
-					cronometro_corriendo = false;
-					HAL_UART_Transmit(&huart4, (uint8_t*)"pausa ok\r\n", 4, 100);
-				}else
-				{
-					// Robustez: Tratamiento de comandos desconocidos[cite: 1]
-					HAL_UART_Transmit(&huart4, (uint8_t*)"ERROR\r\n", 7, 100);
-				}
+	  while (1)
+	  {
 
 
-				// Limpiar variables para el próximo mensaje
-				memset((char*)rx_buffer, 0, sizeof(rx_buffer));
-				rx_index = 0;
-				flag_message = 0;
-			}
 
-			if ((HayNuevaPulsacion(PULSADOR_GPIO_Port, PULSADOR_Pin, &estado_valido2)&&!cronometro_corriendo)||(strcmp((char*)rx_buffer, "reset") ==  0 &&!cronometro_corriendo))
-			{
-				evento_reset(&cronometro_corriendo);
-				HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_4);
-			}
-			// --- 2. TAREA DEL CRONÓMETRO (Se ejecuta cada 10 ms) ---
-			if (flag_10ms == 1)
-			{
-				flag_10ms = 0;
-				if (HayNuevaPulsacion(START_GPIO_Port, START_Pin, &estado_valido1))
-				{
-					// Cambiamos el estado del cronómetro (arranca/para)
-					if(cronometro_corriendo)
-					{
-						evento_pause(&cronometro_corriendo);
-					}else
-					{
-						evento_start(&cronometro_corriendo);
-					}
-
-				}
-
-
-				// --- Lógica del cronómetro ---
-				if (cronometro_corriendo == true)
-				{
-					if (cronometro_corriendo == true)
-					{
-						centesimas++;
-
-						if (centesimas >= 100) // Pasó 1 segundo
-						{
-							centesimas = 0;
-
-							if (tiempo_restante > 0)
-							{
-								tiempo_restante--; // Decrementa hacia atrás
-
-								// Separamos en MM:SS
-								uint8_t min = tiempo_restante / 60;
-								uint8_t seg = tiempo_restante % 60;
-
-								digitos_a_mostrar[3] = min / 10;
-								digitos_a_mostrar[2] = min % 10;
-								digitos_a_mostrar[1] = seg / 10;
-								digitos_a_mostrar[0] = seg % 10;
-							}
-							else
-							{
-								// Llegó a 00.00
-								cronometro_corriendo = false;
-								HAL_UART_Transmit(&huart4, (uint8_t*)"ALARM\r\n", 7, 100);
-								HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4);
-
-							}
-
-						}
-					}
-				}
-			}
-		}
+	  }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -531,7 +457,7 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
-void TareaUART(void* argument)
+void TareaUART(void *argumento)
 {
 	char mensaje_estado[30];
 	for(;;)
@@ -540,26 +466,46 @@ void TareaUART(void* argument)
 		{
 			if(strcmp((char*)rx_buffer, "start") == 0)
 			{
-				evento_start(&cronometro_corriendo);
+				// Lógica de evento_start integrada
+				cronometro_corriendo = true;
+				HAL_UART_Transmit(&huart4, (uint8_t*)"OK\r\n", 4, 100);
 			}
 			else if(strcmp((char*)rx_buffer, "pause") == 0)
 			{
-				evento_pausa(&cronometro_corriendo);
+				// Lógica de evento_pausa integrada
+				cronometro_corriendo = false;
+				HAL_UART_Transmit(&huart4, (uint8_t*)"OK\r\n", 4, 100);
 			}
 			else if(strcmp((char*)rx_buffer, "status") == 0)
 			{
-				evento_status(cronometro_corriendo, tiempo_restante);
+				// Lógica de evento_status integrada
+				uint8_t min = tiempo_restante / 60;
+				uint8_t seg = tiempo_restante % 60;
+
+				if (cronometro_corriendo)
+				{
+					sprintf(mensaje_estado, "RUNNING %02d.%02d\r\n", min, seg);
+				}
+				else if (tiempo_restante == 0)
+				{
+					sprintf(mensaje_estado, "ALARM %02d.%02d\r\n", min, seg);
+				}
+				else
+				{
+					sprintf(mensaje_estado, "PAUSED %02d.%02d\r\n", min, seg);
+				}
+
+				HAL_UART_Transmit(&huart4, (uint8_t*)mensaje_estado, strlen(mensaje_estado), 100);
 			}
 			else if((strncmp((char*)rx_buffer,"set ",4))==0)
 			{
 				int valor_recibido = atoi((char*)&rx_buffer[4]);
 
-				// El laboratorio pide que el rango sea de 0 a 5999 segundos
+				// El laboratorio pide que el rango sea de 0 a 5999 segundos[cite: 5, 6]
 				if (valor_recibido >= 0 && valor_recibido <= 5999)
 				{
 					cronometro_corriendo = false;
 					tiempo_restante = (uint16_t)valor_recibido;
-
 
 					// Actualizamos los dígitos inmediatamente con el nuevo valor
 					ActualizarDigitos();
@@ -568,30 +514,35 @@ void TareaUART(void* argument)
 				}
 				else
 				{
-					// Robustez: ¿Qué pasa si mandan "SET 9000"?[cite: 1]
 					HAL_UART_Transmit(&huart4, (uint8_t*)"ERROR RANGO\r\n", 13, 100);
 				}
 			}
-			else if(strcmp((char*)rx_buffer,"pause")==0)
+			else if(strcmp((char*)rx_buffer, "reset") == 0)
 			{
-				cronometro_corriendo = false;
-				HAL_UART_Transmit(&huart4, (uint8_t*)"pausa ok\r\n", 4, 100);
-			}else
+			    // Si se recibe un reset por UART (opcional, pero útil)
+			    cronometro_corriendo = false;
+			    tiempo_restante = TIEMPO_INICIAL;
+			    ActualizarDigitos();
+			    HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_4);
+			    HAL_UART_Transmit(&huart4, (uint8_t*)"OK\r\n", 4, 100);
+			}
+			else
 			{
-				// Robustez: Tratamiento de comandos desconocidos[cite: 1]
+				// Robustez: Tratamiento de comandos desconocidos
 				HAL_UART_Transmit(&huart4, (uint8_t*)"ERROR\r\n", 7, 100);
 			}
-
 
 			// Limpiar variables para el próximo mensaje
 			memset((char*)rx_buffer, 0, sizeof(rx_buffer));
 			rx_index = 0;
 			flag_message = 0;
 		}
+
+		// Bloqueo para ceder el procesador
 		osDelay(pdMS_TO_TICKS(50));
-		}
 	}
 }
+
 void Display_EscribirPatron(uint8_t patron, uint8_t indice_pantalla)
 {
 	HAL_GPIO_WritePin(SEGMENTO_A_GPIO_Port, SEGMENTO_A_Pin, GPIO_PIN_RESET);
@@ -725,7 +676,7 @@ void seleccionar(uint8_t indicepantalla)
 	}
 }
 
-void tarea_cronometro(void* argumento)
+void TareaCronometro(void *argumento)
 {
 	ActualizarDigitos();
 	uint32_t tick_actual = osKernelGetTickCount();
@@ -733,54 +684,61 @@ void tarea_cronometro(void* argumento)
 	{
 		if(cronometro_corriendo)
 		{
-			if(tiempo_restante>0)
+			if(tiempo_restante > 0)
 			{
-				tiempo_restante --;
+				tiempo_restante--;
 				ActualizarDigitos();
-			}else
+			}
+			else
 			{
 				cronometro_corriendo = false;
-				HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_4);
+				HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4); // Start para encender la alarma
 			}
-
 		}
-		tick_actual+=pdMS_TO_TICKS(1000);
+
+		tick_actual += pdMS_TO_TICKS(1000);
 		osDelayUntil(tick_actual);
 	}
-
 }
-void tarea_botones (void* argumento)
+void TareaBotones(void *argumento)
 {
 	GPIO_PinState estado_start = GPIO_PIN_SET;
 	GPIO_PinState estado_reset = GPIO_PIN_SET;
 	for(;;)
 	{
-		if(HayNuevaPulsacion(PULSADOR_GPIO_Port, PULSADOR_Pin, &estado_start))
+		// Corregido: Leer el puerto y pin correctos para START
+		if(HayNuevaPulsacion(START_GPIO_Port, START_Pin, &estado_start))
 		{
-			Cronometro_corriendo=!cronometro_corriendo;
+			cronometro_corriendo = !cronometro_corriendo;
 		}
+
+		// Leer el puerto y pin para RESET
 		if(HayNuevaPulsacion(PULSADOR_GPIO_Port, PULSADOR_Pin, &estado_reset))
 		{
 			if(!cronometro_corriendo)
 			{
-				tiempo_restante = TIEMPO_INICIAL:
-				actualizar_digitos();
+				tiempo_restante = TIEMPO_INICIAL; // Corregido: punto y coma, no dos puntos
+				ActualizarDigitos(); // Corregido: Nombre exacto de la función
 				HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_4);
 			}
 		}
-	os_Delay(pdMS_TO_TOCKS(10));
+
+		osDelay(pdMS_TO_TICKS(10)); // Corregido: typos os_Delay y TOCKS
 	}
 }
-bool HayNuevaPulsacion(GPIO_TypeDef* PULSADOR,uint16_t PIN, GPIO_PinState* estado_valido)
+bool HayNuevaPulsacion(GPIO_TypeDef *puerto, uint16_t pin, GPIO_PinState *estado_valido)
 {
 	GPIO_PinState lectura1;
 	GPIO_PinState lectura2;
 	bool nueva_pulsacion = false;
-	lectura1 = HAL_GPIO_ReadPin(PULSADOR, PIN);
+
+	lectura1 = HAL_GPIO_ReadPin(puerto, pin);
+
 	if(lectura1 != (*estado_valido))
 	{
-		os_Delay(T_REBOTE_MS);
-		lectura2 = HAL_GPIO_ReadPin(PULSADOR, PIN);
+		osDelay(pdMS_TO_TICKS(T_REBOTE_MS)); //
+		lectura2 = HAL_GPIO_ReadPin(puerto, pin);
+
 		if(lectura2 == lectura1)
 		{
 			GPIO_PinState estado_anterior = *estado_valido;
@@ -792,7 +750,6 @@ bool HayNuevaPulsacion(GPIO_TypeDef* PULSADOR,uint16_t PIN, GPIO_PinState* estad
 		}
 	}
 	return nueva_pulsacion;
-
 }
 void ActualizarDigitos(void) {
     uint8_t min = tiempo_restante / 60;
@@ -802,8 +759,7 @@ void ActualizarDigitos(void) {
     digitos_a_mostrar[1] = seg / 10;
     digitos_a_mostrar[0] = seg % 10;
 }
-
-bool evento_pausa(bool* ptr_cronometro_corriendo)
+/*bool evento_pausa(bool* ptr_cronometro_corriendo)
 {
     *ptr_cronometro_corriendo = false; // Modificamos la variable original
     HAL_UART_Transmit(&huart4, (uint8_t*)"OK\r\n", 4, 100);
@@ -857,7 +813,7 @@ void evento_status(bool cronometro_corriendo, uint16_t tiempo_actual)
     }
 
     HAL_UART_Transmit(&huart4, (uint8_t*)mensaje_estado, strlen(mensaje_estado), 100);
-}
+}*/
 
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef* huart)
@@ -884,6 +840,24 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef* huart)
 
 
 /* USER CODE END 4 */
+
+/* USER CODE BEGIN Header_StartDefaultTask */
+/**
+  * @brief  Function implementing the defaultTask thread.
+  * @param  argument: Not used
+  * @retval None
+  */
+/* USER CODE END Header_StartDefaultTask */
+void StartDefaultTask(void *argument)
+{
+  /* USER CODE BEGIN 5 */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END 5 */
+}
 
 /**
   * @brief  This function is executed in case of error occurrence.
