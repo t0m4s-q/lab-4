@@ -97,17 +97,17 @@ const osThreadAttr_t uart_attr = {
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_TIM1_Init(void);
 static void MX_UART4_Init(void);
+static void MX_TIM1_Init(void);
 static void MX_TIM2_Init(void);
 void StartDefaultTask(void *argument);
 
 /* USER CODE BEGIN PFP */
 void ActualizarDigitos(void);
-void TareaCronometro(void* argumento);
-void TareaUART(void* argumento);
-void TareaBotones(void* argumento);
-bool HayNuevaPulsacion(GPIO_TypeDef* PULSADOR,uint16_t PIN, GPIO_PinState* estado_valido);
+void TareaCronometro(void *argumento);
+void TareaUART(void *argumento);
+void TareaBotones(void *argumento);
+bool HayNuevaPulsacion( GPIO_TypeDef* PULSADOR,uint16_t PIN, GPIO_PinState* estado_valido);
 void Display_EscribirPatron(uint8_t patron, uint8_t indice_pantalla);
 void seleccionar(uint8_t indicepantalla);
 /*bool evento_pausa(bool* ptr_cronometro_corriendo);
@@ -155,17 +155,15 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_TIM1_Init();
   MX_UART4_Init();
+  MX_TIM1_Init();
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
 	HAL_TIM_Base_Start_IT(&htim1);
 	//HAL_UART_Transmit(&huart4, mensaje_prueba, strlen(mensaje_prueba), 100);
 	HAL_UART_Receive_IT(&huart4, &rx_byte, 1);
 	HAL_UART_Transmit_IT(&huart4,(uint8_t*) rx_buffer, rx_index);
-	 osThreadId_t tareaCronometro =  osThreadNew(TareaCronometro, NULL, &crono_attr);
-	  osThreadId_t Botones = osThreadNew(TareaBotones, NULL, &botones_attr);
-	  osThreadId_t UART= osThreadNew(TareaUART, NULL, &uart_attr);
+
 
   /* USER CODE END 2 */
 
@@ -194,6 +192,9 @@ int main(void)
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
+	 osThreadId_t tareaCronometro =  osThreadNew(TareaCronometro, NULL, &crono_attr);
+	  osThreadId_t Botones = osThreadNew(TareaBotones, NULL, &botones_attr);
+	  osThreadId_t UART= osThreadNew(TareaUART, NULL, &uart_attr);
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -240,12 +241,7 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
-  RCC_OscInitStruct.PLL.PLLM = 8;
-  RCC_OscInitStruct.PLL.PLLN = 84;
-  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
-  RCC_OscInitStruct.PLL.PLLQ = 4;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -255,12 +251,12 @@ void SystemClock_Config(void)
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
   {
     Error_Handler();
   }
@@ -285,9 +281,9 @@ static void MX_TIM1_Init(void)
 
   /* USER CODE END TIM1_Init 1 */
   htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 83;
+  htim1.Init.Prescaler = 0;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 1999;
+  htim1.Init.Period = 65535;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
   htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
@@ -332,7 +328,7 @@ static void MX_TIM2_Init(void)
 
   /* USER CODE END TIM2_Init 1 */
   htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 83;
+  htim2.Init.Prescaler = 0;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim2.Init.Period = 2273;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -357,7 +353,7 @@ static void MX_TIM2_Init(void)
     Error_Handler();
   }
   sConfigOC.OCMode = TIM_OCMODE_PWM1;
-  sConfigOC.Pulse = 1137;
+  sConfigOC.Pulse = 0;
   sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
   if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
@@ -637,6 +633,11 @@ void Display_EscribirPatron(uint8_t patron, uint8_t indice_pantalla)
 
 }
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+	  if (htim->Instance == TIM3)
+	  {
+	    HAL_IncTick();
+	  }
+
 	if(htim->Instance == htim1.Instance)
 	{
 		// Avisamos al main que pasaron 2 ms para que cambie la pantalla
@@ -858,6 +859,15 @@ void StartDefaultTask(void *argument)
   }
   /* USER CODE END 5 */
 }
+
+/**
+  * @brief  Period elapsed callback in non blocking mode
+  * @note   This function is called  when TIM3 interrupt took place, inside
+  * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
+  * a global variable "uwTick" used as application time base.
+  * @param  htim : TIM handle
+  * @retval None
+  */
 
 /**
   * @brief  This function is executed in case of error occurrence.
